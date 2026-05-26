@@ -1,0 +1,412 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>빛공해 측정기</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a12;
+            color: #c8d8e8;
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        h1 {
+            font-size: 18px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #7eb8d4;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #1e2a36;
+        }
+
+        .luminance-display {
+            background: #0d1520;
+            border: 1px solid #1e3a50;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .luminance-label {
+            font-size: 11px;
+            letter-spacing: 2px;
+            color: #4a6a80;
+            text-transform: uppercase;
+        }
+
+        .luminance-value {
+            font-size: 48px;
+            font-weight: bold;
+            color: #ffd060;
+            line-height: 1;
+        }
+
+        .luminance-unit {
+            font-size: 14px;
+            color: #4a6a80;
+            margin-top: 4px;
+        }
+
+        .camera-preview {
+            width: 100%;
+            max-height: 120px;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 12px;
+            background: #0d1520;
+            border: 1px solid #1e3a50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        video {
+            width: 100%;
+            max-height: 120px;
+            object-fit: cover;
+            display: block;
+            opacity: 0.6;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 11px;
+            letter-spacing: 2px;
+            color: #ffd060;
+            text-transform: uppercase;
+            pointer-events: none;
+        }
+
+        .measure-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20%;
+            height: 20%;
+            min-width: 28px;
+            min-height: 28px;
+            transform: translate(-50%, -50%);
+            border: 2px solid #ffd060;
+            box-shadow: 0 0 0 999px rgba(10, 10, 18, 0.18), 0 0 12px rgba(255, 208, 96, 0.55);
+            pointer-events: none;
+        }
+
+        .gps-panel {
+            background: #0d1520;
+            border: 1px solid #1e3a50;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            font-size: 12px;
+        }
+
+        .gps-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+        }
+
+        .gps-key { color: #4a6a80; letter-spacing: 1px; }
+        .gps-val { color: #a8d8c0; font-weight: bold; }
+
+        .status-bar {
+            background: #0d1520;
+            border: 1px solid #1e3a50;
+            border-radius: 6px;
+            padding: 8px 14px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            letter-spacing: 1px;
+            min-height: 34px;
+            display: flex;
+            align-items: center;
+        }
+
+        .status-ok { color: #6dcc8a; }
+        .status-warn { color: #ffd060; }
+        .status-err { color: #e87070; }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 8px;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            cursor: pointer;
+            letter-spacing: 1px;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+
+        button:active { transform: scale(0.98); opacity: 0.85; }
+
+        #btn-start {
+            background: #1e3a50;
+            color: #7eb8d4;
+            border: 1px solid #2e5a70;
+        }
+
+        #btn-measure {
+            background: #ffd060;
+            color: #0a0a12;
+        }
+
+        #btn-csv {
+            background: #1e3050;
+            color: #7ea8d4;
+            border: 1px solid #2e4a70;
+        }
+
+        .record-count {
+            font-size: 11px;
+            color: #4a6a80;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .record-list {
+            list-style: none;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .record-list li {
+            padding: 8px 12px;
+            border-bottom: 1px solid #1a2530;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .record-list li:last-child { border-bottom: none; }
+
+        .rec-time { color: #4a6a80; }
+        .rec-luminance { color: #ffd060; font-weight: bold; font-size: 14px; }
+        .rec-loc { color: #7ea8a0; font-size: 11px; }
+    </style>
+</head>
+<body>
+
+    <h1>🌙 빛공해 측정기</h1>
+
+    <div class="camera-preview" id="cameraBox">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="measure-frame" aria-hidden="true"></div>
+        <div class="camera-overlay" id="cameraLabel">카메라 시작 전</div>
+    </div>
+
+    <div class="luminance-display">
+        <div>
+            <div class="luminance-label">하늘 밝기 지수</div>
+            <div class="luminance-unit">Relative Luminance (휘도 지수)</div>
+        </div>
+        <div style="text-align:right">
+            <div class="luminance-value" id="luminance-value">--</div>
+        </div>
+    </div>
+
+    <div class="gps-panel">
+        <div class="gps-row">
+            <span class="gps-key">위도</span>
+            <span class="gps-val" id="lat">대기 중</span>
+        </div>
+        <div class="gps-row">
+            <span class="gps-key">경도</span>
+            <span class="gps-val" id="lng">대기 중</span>
+        </div>
+    </div>
+
+    <div class="status-bar" id="status">
+        <span class="status-warn">▶ 카메라 시작 버튼을 누르세요</span>
+    </div>
+
+    <button id="btn-start">📷 카메라 시작</button>
+    <button id="btn-measure" disabled>📍 현재 위치 측정 기록</button>
+    <button id="btn-csv">📥 CSV 다운로드</button>
+
+    <div class="record-count" id="record-count">기록: 0개</div>
+    <ul class="record-list" id="record-list"></ul>
+
+    <script>
+        let currentLat = null;
+        let currentLng = null;
+        let currentLuminanceIndex = 0;
+        let videoStream = null;
+        let luminanceInterval = null;
+        const records = [];
+
+        function setStatus(msg, type = 'ok') {
+            const el = document.getElementById('status');
+            el.innerHTML = `<span class="status-${type}">${msg}</span>`;
+        }
+
+        // GPS 시작
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition((pos) => {
+                currentLat = pos.coords.latitude.toFixed(6);
+                currentLng = pos.coords.longitude.toFixed(6);
+                document.getElementById('lat').textContent = currentLat;
+                document.getElementById('lng').textContent = currentLng;
+            }, () => {
+                document.getElementById('lat').textContent = 'GPS 권한 필요';
+            }, { enableHighAccuracy: true });
+        }
+
+        async function tryLockAutoExposure(track) {
+            if (!track || typeof track.applyConstraints !== 'function') return false;
+
+            try {
+                await track.applyConstraints({
+                    advanced: [{
+                        exposureMode: 'manual',
+                        exposureCompensation: 0
+                    }]
+                });
+                return true;
+            } catch (err) {
+                console.warn('수동 노출 잠금을 지원하지 않는 기기입니다.', err);
+                return false;
+            }
+        }
+
+        // 카메라 중앙 20% 영역에서 평균 휘도 계산
+        function calcLuminanceFromVideo() {
+            const video = document.getElementById('video');
+            if (!video.videoWidth) return;
+
+            const canvas = document.createElement('canvas');
+            const cropRatio = 0.2;
+            const cropWidth = Math.floor(video.videoWidth * cropRatio);
+            const cropHeight = Math.floor(video.videoHeight * cropRatio);
+            const cropX = Math.floor((video.videoWidth - cropWidth) / 2);
+            const cropY = Math.floor((video.videoHeight - cropHeight) / 2);
+            const scale = 0.5; // 중앙부만 저해상도로 빠르게 처리
+            canvas.width = Math.max(1, Math.floor(cropWidth * scale));
+            canvas.height = Math.max(1, Math.floor(cropHeight * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(
+                video,
+                cropX,
+                cropY,
+                cropWidth,
+                cropHeight,
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            let sum = 0;
+            const pixels = data.length / 4;
+            for (let i = 0; i < data.length; i += 4) {
+                // 인간 눈 밝기 가중치 (luminance)
+                sum += data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+            }
+            const avg = sum / pixels;
+            // 0~255 → 0~1000 하늘 밝기 지수 선형 변환 (상대값)
+            currentLuminanceIndex = Math.round((avg / 255) * 1000);
+            document.getElementById('luminance-value').textContent = currentLuminanceIndex;
+        }
+
+        // 카메라 시작 버튼
+        document.getElementById('btn-start').addEventListener('click', async () => {
+            try {
+                setStatus('카메라 권한 요청 중...', 'warn');
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" }
+                });
+                const [track] = videoStream.getVideoTracks();
+                const exposureLocked = await tryLockAutoExposure(track);
+                const video = document.getElementById('video');
+                video.srcObject = videoStream;
+                document.getElementById('cameraLabel').textContent = '';
+
+                // 하늘 밝기 지수 실시간 갱신 (1초마다)
+                luminanceInterval = setInterval(calcLuminanceFromVideo, 1000);
+
+                document.getElementById('btn-start').textContent = '✅ 카메라 작동 중';
+                document.getElementById('btn-start').style.opacity = '0.5';
+                document.getElementById('btn-start').disabled = true;
+                document.getElementById('btn-measure').disabled = false;
+                setStatus(exposureLocked ? '카메라 실행 중 — AE 잠금 성공' : '카메라 실행 중 — 기기 AE 잠금 미지원', 'ok');
+            } catch (err) {
+                setStatus('카메라 권한을 허용해주세요', 'err');
+            }
+        });
+
+        // 측정 기록 버튼
+        document.getElementById('btn-measure').addEventListener('click', () => {
+            if (!currentLat) {
+                setStatus('GPS 위치를 아직 못 잡았습니다. 잠시 기다려주세요.', 'warn');
+                return;
+            }
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ko-KR');
+
+            records.push({
+                time: timeStr,
+                lat: currentLat,
+                lng: currentLng,
+                luminanceIndex: currentLuminanceIndex
+            });
+
+            // 리스트에 추가
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <div>
+                    <div class="rec-time">${timeStr}</div>
+                    <div class="rec-loc">${currentLat}, ${currentLng}</div>
+                </div>
+                <div class="rec-luminance">${currentLuminanceIndex} LI</div>
+            `;
+            document.getElementById('record-list').prepend(li);
+            document.getElementById('record-count').textContent = `기록: ${records.length}개`;
+            setStatus(`✔ 저장됨 — 휘도 지수 ${currentLuminanceIndex} @ ${currentLat}, ${currentLng}`, 'ok');
+        });
+
+        // CSV 다운로드
+        document.getElementById('btn-csv').addEventListener('click', () => {
+            if (records.length === 0) {
+                setStatus('다운로드할 데이터가 없습니다.', 'warn');
+                return;
+            }
+
+            let csv = "\uFEFF" + "Time,Latitude,Longitude,Luminance_Index\n";
+            records.forEach(r => {
+                csv += `${r.time},${r.lat},${r.lng},${r.luminanceIndex}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `light_data_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setStatus('CSV 다운로드 완료', 'ok');
+        });
+    </script>
+</body>
+</html>
+
