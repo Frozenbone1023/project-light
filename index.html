@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -31,9 +31,14 @@
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 12px;
+        }
+
+        .luminance-head {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 14px;
         }
 
         .luminance-label {
@@ -54,6 +59,72 @@
             font-size: 14px;
             color: #4a6a80;
             margin-top: 4px;
+        }
+
+        .luminance-meter {
+            position: relative;
+            height: 12px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #071018, #102236);
+            border: 1px solid #1e3a50;
+        }
+
+        .luminance-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #5bc0eb, #a8d8c0 52%, #ffd060 78%, #e87070);
+            box-shadow: 0 0 14px rgba(255, 208, 96, 0.42);
+            transition: width 0.35s ease, filter 0.35s ease;
+        }
+
+        .luminance-fill.unstable {
+            filter: saturate(1.25);
+            animation: pulseBar 0.9s ease-in-out infinite alternate;
+        }
+
+        .luminance-meta {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 11px;
+            letter-spacing: 1px;
+            color: #4a6a80;
+        }
+
+        .luminance-meta span:last-child { text-align: right; }
+
+        .stability-pill {
+            min-width: 116px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            text-align: center;
+            color: #4a6a80;
+            border: 1px solid #1e3a50;
+            background: rgba(10, 18, 28, 0.8);
+        }
+
+        .stability-pill.stable {
+            color: #6dcc8a;
+            border-color: rgba(109, 204, 138, 0.45);
+        }
+
+        .stability-pill.caution {
+            color: #ffd060;
+            border-color: rgba(255, 208, 96, 0.45);
+        }
+
+        .stability-pill.unstable {
+            color: #e87070;
+            border-color: rgba(232, 112, 112, 0.55);
+        }
+
+        @keyframes pulseBar {
+            from { opacity: 0.72; }
+            to { opacity: 1; }
         }
 
         .camera-preview {
@@ -213,12 +284,22 @@
     </div>
 
     <div class="luminance-display">
-        <div>
-            <div class="luminance-label">하늘 밝기 지수</div>
-            <div class="luminance-unit">Relative Luminance (휘도 지수)</div>
+        <div class="luminance-head">
+            <div>
+                <div class="luminance-label">하늘 밝기 지수</div>
+                <div class="luminance-unit">Relative Luminance (휘도 지수)</div>
+            </div>
+            <div style="text-align:right">
+                <div class="luminance-value" id="luminance-value">--</div>
+            </div>
         </div>
-        <div style="text-align:right">
-            <div class="luminance-value" id="luminance-value">--</div>
+        <div class="luminance-meter" aria-hidden="true">
+            <div class="luminance-fill" id="luminance-fill"></div>
+        </div>
+        <div class="luminance-meta">
+            <span>0</span>
+            <span class="stability-pill" id="stability-indicator">안정도 확인 중</span>
+            <span>1000</span>
         </div>
     </div>
 
@@ -250,11 +331,66 @@
         let currentLuminanceIndex = 0;
         let videoStream = null;
         let luminanceInterval = null;
+        let stabilityState = 'checking';
+        let unstableWarningVisible = false;
+        const luminanceSamples = [];
+        const MAX_STABILITY_SAMPLES = 6;
+        const CAUTION_RANGE = 45;
+        const UNSTABLE_RANGE = 90;
+        const UNSTABLE_STATUS_MESSAGE = '측정값 변동이 큽니다. 휴대폰을 고정하고 주변 직접광을 피해주세요.';
         const records = [];
 
         function setStatus(msg, type = 'ok') {
             const el = document.getElementById('status');
             el.innerHTML = `<span class="status-${type}">${msg}</span>`;
+        }
+
+        function updateLuminanceMeter(value) {
+            const fill = document.getElementById('luminance-fill');
+            const percent = Math.max(0, Math.min(100, value / 10));
+            fill.style.width = `${percent}%`;
+        }
+
+        function updateStability(value) {
+            const indicator = document.getElementById('stability-indicator');
+            const fill = document.getElementById('luminance-fill');
+            luminanceSamples.push(value);
+            if (luminanceSamples.length > MAX_STABILITY_SAMPLES) luminanceSamples.shift();
+
+            if (luminanceSamples.length < 4) {
+                indicator.textContent = '안정도 확인 중';
+                indicator.className = 'stability-pill';
+                fill.classList.remove('unstable');
+                stabilityState = 'checking';
+                return;
+            }
+
+            const min = Math.min(...luminanceSamples);
+            const max = Math.max(...luminanceSamples);
+            const range = max - min;
+            let nextState = 'stable';
+            let label = `안정 ±${Math.round(range / 2)}`;
+
+            if (range >= UNSTABLE_RANGE) {
+                nextState = 'unstable';
+                label = `불안정 Δ${range}`;
+            } else if (range >= CAUTION_RANGE) {
+                nextState = 'caution';
+                label = `주의 Δ${range}`;
+            }
+
+            indicator.textContent = label;
+            indicator.className = `stability-pill ${nextState}`;
+            fill.classList.toggle('unstable', nextState === 'unstable');
+
+            if (nextState === 'unstable' && stabilityState !== 'unstable') {
+                setStatus(UNSTABLE_STATUS_MESSAGE, 'warn');
+                unstableWarningVisible = true;
+            } else if (unstableWarningVisible && stabilityState === 'unstable' && nextState !== 'unstable') {
+                unstableWarningVisible = false;
+                setStatus(nextState === 'stable' ? '측정값이 안정되었습니다. 기록해도 좋습니다.' : '측정값 변동이 줄었습니다. 조금 더 고정하면 안정됩니다.', nextState === 'stable' ? 'ok' : 'warn');
+            }
+            stabilityState = nextState;
         }
 
         // GPS 시작
@@ -324,6 +460,8 @@
             // 0~255 → 0~1000 하늘 밝기 지수 선형 변환 (상대값)
             currentLuminanceIndex = Math.round((avg / 255) * 1000);
             document.getElementById('luminance-value').textContent = currentLuminanceIndex;
+            updateLuminanceMeter(currentLuminanceIndex);
+            updateStability(currentLuminanceIndex);
         }
 
         // 카메라 시작 버튼
@@ -409,4 +547,7 @@
     </script>
 </body>
 </html>
+
+
+
 
