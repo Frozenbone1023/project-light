@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -477,10 +477,6 @@
             return typeof track.getCapabilities === 'function' ? track.getCapabilities() : {};
         }
 
-        function supportsExposureMode(track, mode) {
-            const modes = getExposureCapabilities(track).exposureMode;
-            return !Array.isArray(modes) || modes.includes(mode);
-        }
 
         function getSkyExposureCompensation(track) {
             const range = getExposureCapabilities(track).exposureCompensation;
@@ -496,17 +492,23 @@
 
         async function applyExposureConstraints(track, exposureMode, exposureCompensation) {
             if (!track || typeof track.applyConstraints !== 'function') return false;
-            if (exposureMode && !supportsExposureMode(track, exposureMode)) return false;
 
-            try {
-                await track.applyConstraints({
-                    advanced: [{ exposureMode, exposureCompensation }]
-                });
-                return true;
-            } catch (err) {
-                console.warn(`${exposureMode} 노출 제어를 지원하지 않는 기기입니다.`, err);
-                return false;
+            const attempts = [];
+            if (typeof exposureCompensation === 'number') {
+                attempts.push({ exposureMode, exposureCompensation });
             }
+            attempts.push({ exposureMode });
+
+            for (const advanced of attempts) {
+                try {
+                    await track.applyConstraints({ advanced: [advanced] });
+                    return true;
+                } catch (err) {
+                    console.warn('노출 제어 적용 실패', advanced, err);
+                }
+            }
+
+            return false;
         }
 
         function summarizeSamples(samples) {
@@ -698,7 +700,7 @@
                 } else {
                     setStatus('이 기기/브라우저는 AE 수동 잠금을 지원하지 않아 자동 노출로 측정합니다.', 'warn');
                 }
-                if (!exposureResult.locked && exposureResult.reason !== 'unsupported' && exposureResult.reason !== 'noSamples') {
+                if (!exposureResult.locked && exposureResult.reason !== 'noSamples') {
                     scheduleExposureRetry(track);
                 }
             } catch (err) {
@@ -763,6 +765,12 @@
     </script>
 </body>
 </html>
+
+
+
+
+
+
 
 
 
