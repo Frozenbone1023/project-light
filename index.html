@@ -160,44 +160,6 @@
             white-space: nowrap;
         }
 
-        .exposure-control {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid #1a2530;
-            font-size: 11px;
-            letter-spacing: 1px;
-            color: #4a6a80;
-        }
-
-        .exposure-options {
-            display: grid;
-            grid-template-columns: repeat(3, 42px);
-            gap: 6px;
-        }
-
-        .exposure-option {
-            width: 42px;
-            min-height: 28px;
-            margin: 0;
-            padding: 0;
-            border-radius: 6px;
-            border: 1px solid #1e3a50;
-            background: #0a121c;
-            color: #7eb8d4;
-            font-size: 12px;
-            letter-spacing: 0;
-        }
-
-        .exposure-option.active {
-            border-color: #ffd060;
-            background: #1d2730;
-            color: #ffd060;
-        }
-
         @keyframes pulseBar {
             from { opacity: 0.72; }
             to { opacity: 1; }
@@ -382,14 +344,6 @@
             <span class="exposure-pill" id="exposure-indicator">대기 중</span>
             <span class="exposure-detail" id="exposure-detail">카메라 시작 전</span>
         </div>
-        <div class="exposure-control">
-            <span>노출 보정</span>
-            <div class="exposure-options" id="exposure-options">
-                <button class="exposure-option active" type="button" data-compensation="0">0</button>
-                <button class="exposure-option" type="button" data-compensation="1">+1</button>
-                <button class="exposure-option" type="button" data-compensation="2">+2</button>
-            </div>
-        </div>
     </div>
 
     <div class="gps-panel">
@@ -425,7 +379,6 @@
         let exposureLocked = false;
         let exposureRetryTimer = null;
         let exposureRetryRunning = false;
-        let selectedExposureCompensation = 0;
         const luminanceSamples = [];
         const MAX_STABILITY_SAMPLES = 6;
         const CAUTION_RANGE = 45;
@@ -495,50 +448,34 @@
             stabilityState = nextState;
         }
 
+        function markGpsUnavailable(message) {
+            currentLat = null;
+            currentLng = null;
+            document.getElementById('lat').textContent = message;
+            document.getElementById('lng').textContent = message;
+        }
+
         // GPS 시작
-        if ("geolocation" in navigator) {
+        if ('geolocation' in navigator) {
             navigator.geolocation.watchPosition((pos) => {
-                currentLat = pos.coords.latitude.toFixed(6);
-                currentLng = pos.coords.longitude.toFixed(6);
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                    markGpsUnavailable('GPS 대기 중');
+                    return;
+                }
+
+                currentLat = lat.toFixed(6);
+                currentLng = lng.toFixed(6);
                 document.getElementById('lat').textContent = currentLat;
                 document.getElementById('lng').textContent = currentLng;
             }, () => {
-                document.getElementById('lat').textContent = 'GPS 권한 필요';
+                markGpsUnavailable('GPS 권한 필요');
             }, { enableHighAccuracy: true });
+        } else {
+            markGpsUnavailable('GPS 미지원');
         }
 
-        document.getElementById('exposure-options').addEventListener('click', (event) => {
-            const button = event.target.closest('.exposure-option');
-            if (!button) return;
-
-            selectedExposureCompensation = Number(button.dataset.compensation);
-            updateExposureOptionUI();
-
-            if (!videoStream) {
-                updateExposureStatus('대기 중', '', `보정값 ${selectedExposureCompensation >= 0 ? '+' : ''}${selectedExposureCompensation}`);
-                return;
-            }
-
-            const [track] = videoStream.getVideoTracks();
-            updateExposureStatus('보정 변경됨', 'checking', `보정값 ${selectedExposureCompensation >= 0 ? '+' : ''}${selectedExposureCompensation}`);
-            setStatus('노출 보정값이 변경되었습니다. AE 잠금을 다시 평가합니다.', 'warn');
-            restartExposureEvaluation(track);
-        });
-
-        function updateExposureOptionUI() {
-            document.querySelectorAll('.exposure-option').forEach(btn => {
-                btn.classList.toggle('active', Number(btn.dataset.compensation) === selectedExposureCompensation);
-            });
-        }
-
-        function restartExposureEvaluation(track) {
-            exposureLocked = false;
-            if (exposureRetryTimer) {
-                clearTimeout(exposureRetryTimer);
-                exposureRetryTimer = null;
-            }
-            scheduleExposureRetry(track);
-        }
 
         function wait(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
@@ -552,43 +489,21 @@
             detailEl.textContent = detail;
         }
 
-        function getExposureCapabilities(track) {
-            return typeof track.getCapabilities === 'function' ? track.getCapabilities() : {};
-        }
 
-
-        function getSkyExposureCompensation(track) {
-            const range = getExposureCapabilities(track).exposureCompensation;
-            if (!range) return selectedExposureCompensation;
-
-            const min = typeof range.min === 'number' ? range.min : -Infinity;
-            const max = typeof range.max === 'number' ? range.max : Infinity;
-            const step = typeof range.step === 'number' && range.step > 0 ? range.step : 0;
-            let value = Math.max(min, Math.min(max, selectedExposureCompensation));
-            if (step) value = Math.round(value / step) * step;
-            return value;
-        }
-
-        async function applyExposureConstraints(track, exposureMode, exposureCompensation) {
+        async function applyExposureConstraints(track, exposureMode) {
             if (!track || typeof track.applyConstraints !== 'function') return false;
 
-            const attempts = [];
-            if (typeof exposureCompensation === 'number') {
-                attempts.push({ exposureMode, exposureCompensation });
+            try {
+                await track.applyConstraints({
+                    advanced: [{ exposureMode }]
+                });
+                return true;
+            } catch (err) {
+                console.warn(`${exposureMode} 노출 제어를 지원하지 않는 기기입니다.`, err);
+                return false;
             }
-            attempts.push({ exposureMode });
-
-            for (const advanced of attempts) {
-                try {
-                    await track.applyConstraints({ advanced: [advanced] });
-                    return true;
-                } catch (err) {
-                    console.warn('노출 제어 적용 실패', advanced, err);
-                }
-            }
-
-            return false;
         }
+
 
         function summarizeSamples(samples) {
             const min = Math.min(...samples);
@@ -613,8 +528,9 @@
         async function collectExposureSamples(durationMs = AE_WARMUP_MS) {
             const samples = [];
             const startedAt = Date.now();
+            const maxWaitMs = durationMs + 5000;
 
-            while (Date.now() - startedAt < durationMs || samples.length < LOCK_MIN_SAMPLES) {
+            while ((Date.now() - startedAt < durationMs || samples.length < LOCK_MIN_SAMPLES) && Date.now() - startedAt < maxWaitMs) {
                 const value = calcLuminanceFromVideo(false);
                 if (typeof value === 'number') samples.push(value);
 
@@ -648,8 +564,7 @@
                 }
 
                 updateExposureStatus('AE 잠금 재시도', 'checking', readiness.detail);
-                const compensation = getSkyExposureCompensation(track);
-                const locked = await applyExposureConstraints(track, 'manual', compensation);
+                const locked = await applyExposureConstraints(track, 'manual');
                 if (locked) {
                     exposureLocked = true;
                     updateExposureStatus('AE 잠금 ON', 'locked', readiness.detail);
@@ -661,11 +576,10 @@
         }
 
         async function prepareSkyExposure(track) {
-            const exposureCompensation = getSkyExposureCompensation(track);
-            updateExposureStatus('AE 보정 중', 'checking', `${exposureCompensation >= 0 ? '보정값 +' : '보정값 '}${exposureCompensation}`);
+            updateExposureStatus('AE 적응 준비', 'checking', '자동 노출 준비 중');
 
-            const autoReady = await applyExposureConstraints(track, 'continuous', exposureCompensation)
-                || await applyExposureConstraints(track, 'auto', exposureCompensation);
+            const autoReady = await applyExposureConstraints(track, 'continuous')
+                || await applyExposureConstraints(track, 'auto');
 
             if (!autoReady) {
                 updateExposureStatus('AE 제어 미지원', 'unsupported', '브라우저/기기 제한');
@@ -685,7 +599,7 @@
             }
 
             updateExposureStatus('AE 잠금 시도', 'checking', readiness.detail);
-            const locked = await applyExposureConstraints(track, 'manual', exposureCompensation);
+            const locked = await applyExposureConstraints(track, 'manual');
 
             if (locked) {
                 updateExposureStatus('AE 잠금 ON', 'locked', readiness.detail);
@@ -789,7 +703,7 @@
 
         // 측정 기록 버튼
         document.getElementById('btn-measure').addEventListener('click', () => {
-            if (!currentLat) {
+            if (!currentLat || !currentLng) {
                 setStatus('GPS 위치를 아직 못 잡았습니다. 잠시 기다려주세요.', 'warn');
                 return;
             }
@@ -801,8 +715,7 @@
                 time: timeStr,
                 lat: currentLat,
                 lng: currentLng,
-                luminanceIndex: currentLuminanceIndex,
-                exposureCompensation: selectedExposureCompensation
+                luminanceIndex: currentLuminanceIndex
             });
 
             // 리스트에 추가
@@ -812,11 +725,11 @@
                     <div class="rec-time">${timeStr}</div>
                     <div class="rec-loc">${currentLat}, ${currentLng}</div>
                 </div>
-                <div class="rec-luminance">${currentLuminanceIndex} LI · EC ${selectedExposureCompensation >= 0 ? '+' : ''}${selectedExposureCompensation}</div>
+                <div class="rec-luminance">${currentLuminanceIndex} LI</div>
             `;
             document.getElementById('record-list').prepend(li);
             document.getElementById('record-count').textContent = `기록: ${records.length}개`;
-            setStatus(`✔ 저장됨 — 휘도 지수 ${currentLuminanceIndex}, EC ${selectedExposureCompensation >= 0 ? '+' : ''}${selectedExposureCompensation} @ ${currentLat}, ${currentLng}`, 'ok');
+            setStatus(`✔ 저장됨 — 휘도 지수 ${currentLuminanceIndex} @ ${currentLat}, ${currentLng}`, 'ok');
         });
 
         // CSV 다운로드
@@ -826,9 +739,9 @@
                 return;
             }
 
-            let csv = "\uFEFF" + "Time,Latitude,Longitude,Luminance_Index,Exposure_Compensation\n";
+            let csv = "\uFEFF" + "Time,Latitude,Longitude,Luminance_Index\n";
             records.forEach(r => {
-                csv += `${r.time},${r.lat},${r.lng},${r.luminanceIndex},${r.exposureCompensation}\n`;
+                csv += `${r.time},${r.lat},${r.lng},${r.luminanceIndex}\n`;
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -845,9 +758,4 @@
     </script>
 </body>
 </html>
-
-
-
-
-
 
